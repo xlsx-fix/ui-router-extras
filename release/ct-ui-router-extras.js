@@ -1356,9 +1356,10 @@ angular.module("ct.ui.router.extras.sticky").config(
         futureState.parentFutureState = futureParent;
       }
       if (futureState.url) {
+        var params = futureState.params ? futureState.params : {};
         futureState.urlMatcher = futureState.url.charAt(0) === "^" ?
-          $urlMatcherFactory.compile(futureState.url.substring(1) + "*rest") :
-          parentMatcher.concat(futureState.url + "*rest");
+            $urlMatcherFactory.compile(futureState.url.substring(1) + "*rest", { params: params }) :
+            parentMatcher.concat(futureState.url + "*rest", { params: params });
       }
     };
 
