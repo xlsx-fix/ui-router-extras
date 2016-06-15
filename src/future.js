@@ -50,7 +50,7 @@
 
       futureStates[futureState.name] = futureState;
       var parentMatcher,  parentName = futureState.name.split(/\./).slice(0, -1).join("."),
-        realParent = findState(futureState.parent || parentName);
+          realParent = findState(futureState.parent || parentName);
       if (realParent) {
         parentMatcher = realParent.url || realParent.navigable && realParent.navigable.url;
       } else if (parentName === "") {
@@ -73,8 +73,8 @@
       if (futureState.url) {
         var params = futureState.params ? futureState.params : {};
         futureState.urlMatcher = futureState.url.charAt(0) === "^" ?
-          $urlMatcherFactory.compile(futureState.url.substring(1) + "*rest", { params: params }) :
-          parentMatcher.concat(futureState.url + "*rest", { params: params });
+            $urlMatcherFactory.compile(futureState.url.substring(1) + "*rest", { params: params }) :
+            parentMatcher.concat(futureState.url + "*rest", { params: params });
       }
     };
 
@@ -87,19 +87,62 @@
       return !findFutureState ? internalStates[statename] : futureStates[statename];
     }
 
+    function shortenStateChain(chain) {
+      var stateChain = chain.split('.');
+      stateChain.pop();
+      return stateChain.join('.');
+    }
+
+    // finds the state the current ui-sref element given in stateOrName it refers to. A large portion of this code was copied from angular ui router
+    this.findStateByName = function($currentState, stateOrName, base) {
+      if (!stateOrName) { return undefined; }
+      var isStr = typeof stateOrName === 'string',
+          name  = isStr ? stateOrName : stateOrName.name,
+          path  = name.indexOf(".") === 0 || name.indexOf("^") === 0; // is relative yes no.
+
+      if (path) {
+        if (!base) { throw new Error("No reference point given for path '"  + name + "'"); }
+        var recursiveResult = provider.findStateByName($currentState, base);
+        base = recursiveResult.state;
+
+        var rel = name.split("."), i = 0, pathLength = rel.length, current = base;
+
+        for (; i < pathLength; i++) {
+          if (rel[i] === "" && i === 0) {
+            current = base;
+            continue;
+          }
+          if (rel[i] === "^") {
+            var parent = $currentState.get(shortenStateChain(current.name));
+            if (!parent) { throw new Error("Path '" + name + "' not valid for state '" + base.name + "'"); }
+            current = parent;
+            continue;
+          }
+          break;
+        }
+        rel = rel.slice(i).join(".");
+        name = current.name + (current.name && rel ? "." : "") + rel;
+      }
+      var state = $currentState.get(name);
+      if (state && (isStr || (!isStr && (state === stateOrName || state.name === stateOrName.name)))) {
+        return { state: state, isFutureState: false };
+      }
+      // no matching state found. check if a future state with this name is found
+      var futureState = futureStates[name];
+      if (futureState) {
+        return { state: futureState, stateName: name, isFutureState: true };
+      }
+      return null;
+    };
+
     /* options is an object with at least a name or url attribute */
     function findFutureState($state, options) {
+
       if (options.name) {
-        var nameComponents = options.name.split(/\./);
-        if (options.name.charAt(0) === '.')
-          nameComponents[0] = $state.current.name;
-        while (nameComponents.length) {
-          var stateName = nameComponents.join(".");
-          if ($state.get(stateName, { relative: $state.current }))
-            return null; // State is already defined; nothing to do
-          if (futureStates[stateName])
-            return futureStates[stateName];
-          nameComponents.pop();
+        var context = options.context || $state.$current;
+        var futureState = provider.findStateByName($state, options.name, context);
+        if (futureState && futureState.isFutureState) {
+          return futureState.state;
         }
       }
 
@@ -167,36 +210,36 @@
       var resyncing = false;
 
       var lazyLoadMissingState =
-        ['$rootScope', '$urlRouter', '$state',
-          function lazyLoadMissingState($rootScope, $urlRouter, $state) {
-            function resync() {
-              resyncing = true; $urlRouter.sync(); resyncing = false;
-            }
-            if (!initDone) {
-              // Asynchronously load state definitions, then resync URL
-              initPromise().then(resync);
-              initDone = true;
-              return;
-            }
+          ['$rootScope', '$urlRouter', '$state',
+            function lazyLoadMissingState($rootScope, $urlRouter, $state) {
+              function resync() {
+                resyncing = true; $urlRouter.sync(); resyncing = false;
+              }
+              if (!initDone) {
+                // Asynchronously load state definitions, then resync URL
+                initPromise().then(resync);
+                initDone = true;
+                return;
+              }
 
-            var futureState = findFutureState($state, { url: $location.path() });
-            if (!futureState) {
-              return $injector.invoke(otherwiseFunc);
-            }
+              var futureState = findFutureState($state, { url: $location.path() });
+              if (!futureState) {
+                return $injector.invoke(otherwiseFunc);
+              }
 
-            // Config loaded.  Asynchronously lazy-load state definition from URL fragment, if mapped.
-            lazyLoadState($injector, futureState).then(function lazyLoadedStateCallback(states) {
-              states.forEach(function (state) {
-                if (state && (!$state.get(state) || (state.name && !$state.get(state.name))))
-                  $stateProvider.state(state);
+              // Config loaded.  Asynchronously lazy-load state definition from URL fragment, if mapped.
+              lazyLoadState($injector, futureState).then(function lazyLoadedStateCallback(states) {
+                states.forEach(function (state) {
+                  if (state && (!$state.get(state) || (state.name && !$state.get(state.name))))
+                    $stateProvider.state(state);
+                });
+                lazyloadInProgress = false;
+                resync();
+              }, function lazyLoadStateAborted() {
+                lazyloadInProgress = false;
+                resync();
               });
-              lazyloadInProgress = false;
-              resync();
-            }, function lazyLoadStateAborted() {
-              lazyloadInProgress = false;
-              resync();
-            });
-          }];
+            }];
       if (lazyloadInProgress) return;
 
       var nextFn = resyncing ? otherwiseFunc : lazyLoadMissingState;
@@ -229,7 +272,7 @@
             if (lazyloadInProgress) return;
             //$log.debug("event, unfoundState, fromState, fromParams", event, unfoundState, fromState, fromParams);
 
-            var futureState = findFutureState($state, { name: unfoundState.to });
+            var futureState = findFutureState($state, { name: unfoundState.to, context: unfoundState.options ? unfoundState.options.context : null });
             if (!futureState) return;
 
             event.preventDefault();
@@ -277,6 +320,7 @@
         serviceObject.state = $stateProvider.state;
         serviceObject.futureState = provider.futureState;
         serviceObject.get = provider.get;
+        serviceObject.findStateByName = provider.findStateByName;
 
         return serviceObject;
       }
